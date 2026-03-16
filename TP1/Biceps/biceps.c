@@ -40,6 +40,12 @@ int analyseCom(char *b) {
     return NMots;
 }
 
+void libereMots() {
+    for (int i = 0; i < NMots; i++) {
+        free(Mots[i]);
+    }
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
@@ -81,10 +87,22 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        // Si la ligne n'est pas vide, on l'affiche et on l'ajoute à l'historique pour utiliser la flèche du haut
         if (strlen(ligne) > 0) {
             add_history(ligne);
-            printf("Vous avez tapé : %s\n", ligne);
+            
+            /* Appel de l'analyse */
+            int n = analyseCom(ligne);
+
+            /* Affichage du résultat de l'analyse */
+            if (n > 0) {
+                printf("Commande : %s\n", Mots[0]);
+                for (int i = 1; i < n; i++) {
+                    printf("  Parametre[%d] : %s\n", i, Mots[i]);
+                }
+            }
+
+            /* Nettoyage de la mémoire dynamique  */
+            libereMots();
         }
 
         // Libérer la mémoire de la ligne lue
