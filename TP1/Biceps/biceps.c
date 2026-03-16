@@ -1,86 +1,62 @@
-/* triceps.c : le tres rudimentaire interpreteur de commande des etudiants de
-  Polytech-Sorbonne
- a n'utiliser QUE si votre biceps ne fonctionne pas */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
-int run = 1, debug=0;
+int main(int argc, char *argv[]) {
+    char hostname[256];
+    char *user;
+    char *prompt;
+    char *ligne;
+    char symbole;
 
-#define MAXPAR 10 /* nombre maximum de mots dans la commande */
+    // Récupérer le nom de la machine
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+        strcpy(hostname, "unknown");
+    }
 
-char * Mots[MAXPAR];
-int NMots;
+    // Récupérer l'utilisateur via l'environnement
+    user = getenv("USER");
+    if (user == NULL) user = "user";
 
-void Sortie(void) { run = 0; }
+    // Déterminer le symbole (# pour root, $ sinon) 
+    // getuid() == 0 signifie qu'on est root
+    symbole = (getuid() == 0) ? '#' : '$';
 
-void executeCommande(void)
-{
-   if (strcmp(Mots[0],"exit") == 0) return Sortie();
-   fprintf(stderr,"%s : commande inexistante !\n",Mots[0]);
-   return;
-}
+    // Allouer dynamiquement le prompt : user + @ + machine + symbole + espace + \0 
+    // la taille = strlen(user) + 1 + strlen(hostname) + 1 + 1 (espace) + 1 (\0)
+    prompt = malloc(strlen(user) + strlen(hostname) + 4);
+    
+    if (prompt == NULL) {
+        perror("Erreur malloc prompt");
+        return 1;
+    }
 
-int traiteCommande(char * b) /* separe la ligne de commande en mots */
-{
-char *d, *f;
-int mode =1;
-   d=b;
-   f=b+strlen(b);
-   NMots=0;
-   while (d<f) {
-     if (mode) { /* on cherche le 1er car. non separateur */
-        if ((*d != ' ') && (*d != '\t')) {
-           if (NMots == MAXPAR) break;
-           Mots[NMots++] = d;
-           mode = 0;
+    // Assemblage du prompt 
+    sprintf(prompt, "%s@%s%c ", user, hostname, symbole);
+
+    // Boucle interactive avec readline
+    while (1) {
+        ligne = readline(prompt);
+
+        if (ligne == NULL) {
+            printf("\nSortie de biceps... Bye !\n");
+            break;
         }
-     } else { /* on cherche le 1er separateur */
-        if ((*d == ' ') || (*d == '\t')) {
-          *d = '\0';
-          mode = 1;
-        }
-     } 
-     d++;
-   }
-   if (debug) printf("Il y a %d mots\n",NMots);
-   return NMots;
-}
 
-int main(int N, char * P[])
-{
-char *buf=NULL;
-size_t lb=0;
-int n, i;
-   if (N > 2) {
-      fprintf(stderr,"Utilisation : %s [-d]\n",P[0]); return 1;
-   }
-   if (N == 2) {
-      if (strcmp(P[1],"-d") == 0) debug=1;
-      else fprintf(stderr,"parametre %s invalide !\n",P[1]);
-   }
-   while (run) {
-     printf("triceps> ");
-     if ((n = getline(&buf, &lb, stdin)) != -1) {
-         if (buf[n-1] == '\n') buf[--n] = '\0';
-         if (debug) printf("Lu %d car.: %s\n",n,buf);
-     } else break;
-     /* traitement de la commande */
-     n = traiteCommande(buf);
-     if (debug) {
-        printf("La commande est %s !\n",Mots[0]);
-        if (n > 1) {
-           printf("Les parametres sont :\n");
-           for (i=1; i<n; i++) printf("\t%s\n",Mots[i]);
+        // Si la ligne n'est pas vide, on l'affiche et on l'ajoute à l'historique pour utiliser la flèche du haut
+        if (strlen(ligne) > 0) {
+            add_history(ligne);
+            printf("Vous avez tapé : %s\n", ligne);
         }
-     }
-     if (n>0) executeCommande();
-     free(buf);
-     n=0;
-     buf=NULL;
-   }
-   printf("Bye !\n");
-   return 0;
-}
 
+        // Libérer la mémoire de la ligne lue
+        free(ligne);
+    }
+
+    free(prompt);
+    return 0;
+}
