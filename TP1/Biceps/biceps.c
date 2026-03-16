@@ -7,9 +7,19 @@
 #include <readline/history.h>
 
 #define MAXPAR 20
+#define NBMAXC 10 /* Nb max de commandes internes */
 
 static char *Mots[MAXPAR]; /* le tableau des mots de la commande */
 static int NMots;          /* nombre de mots de la commande */
+
+/* Structure pour une commande interne */
+typedef struct {
+    char *nom;                             /* Nom de la commande */
+    int (*fonction)(int, char **);         /* Pointeur sur la fonction associée */
+} CommandeInterne;
+
+static CommandeInterne TabComInt[NBMAXC];  /* Tableau des commandes internes */
+static int NbComInt = 0;                   /* Nombre actuel de commandes internes */
 
 /* Copie dynamique d'une chaîne */
 char *copyString(char *s) {
@@ -46,6 +56,41 @@ void libereMots() {
     }
 }
 
+/* Ajoute une commande au tableau */
+void ajouteCom(char *nom, int (*f)(int, char **)) {
+    if (NbComInt < NBMAXC) {
+        TabComInt[NbComInt].nom = nom;
+        TabComInt[NbComInt].fonction = f;
+        NbComInt++;
+    } else {
+        fprintf(stderr, "Erreur : Trop de commandes internes\n");
+        exit(1);
+    }
+}
+
+/* La fonction pour la commande 'exit' */
+int Sortie(int n, char **p) {
+    printf("Bye !\n");
+    exit(0);
+}
+
+/* Initialisation du tableau des commandes */
+void majComInt(void) {
+    ajouteCom("exit", Sortie);
+    /* On pourra ajouter "cd" ou "pwd" plus tard ici */
+}
+
+/* Exécute la commande si elle est interne */
+int execComInt(int n, char **p) {
+    for (int i = 0; i < NbComInt; i++) {
+        if (strcmp(p[0], TabComInt[i].nom) == 0) {
+            TabComInt[i].fonction(n, p);
+            return 1; /* C'est une commande interne */
+        }
+    }
+    return 0; /* Pas une commande interne */
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
@@ -77,6 +122,9 @@ int main(int argc, char *argv[]) {
 
     // Assemblage du prompt 
     sprintf(prompt, "%s@%s%c ", user, hostname, symbole);
+    
+    // Initialisation des commandes internes
+    majComInt();
 
     // Boucle interactive avec readline
     while (1) {
@@ -90,22 +138,23 @@ int main(int argc, char *argv[]) {
         if (strlen(ligne) > 0) {
             add_history(ligne);
             
-            /* Appel de l'analyse */
+            /* Analyse de la ligne en mots */
             int n = analyseCom(ligne);
 
-            /* Affichage du résultat de l'analyse */
             if (n > 0) {
-                printf("Commande : %s\n", Mots[0]);
-                for (int i = 1; i < n; i++) {
-                    printf("  Parametre[%d] : %s\n", i, Mots[i]);
+                /* Tentative d'exécution en tant que commande interne */
+                /* On passe le nombre de mots et le tableau global Mots */
+                if (!execComInt(n, Mots)) {
+                    /* Si ce n'est pas une commande interne, on affiche simplement */
+                    printf("%s : commande externe\n", Mots[0]);
                 }
             }
 
-            /* Nettoyage de la mémoire dynamique  */
+            /* Nettoyage des mots copiés par copyString */
             libereMots();
         }
 
-        // Libérer la mémoire de la ligne lue
+        // Libérer la mémoire de la ligne lue par readline
         free(ligne);
     }
 
