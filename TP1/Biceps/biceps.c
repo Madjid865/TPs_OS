@@ -6,6 +6,11 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+#define MAXPAR 20
+
+static char *Mots[MAXPAR]; /* le tableau des mots de la commande */
+static int NMots;          /* nombre de mots de la commande */
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
