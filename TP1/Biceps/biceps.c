@@ -20,6 +20,26 @@ char *copyString(char *s) {
     return copy;
 }
 
+/* Analyse la ligne et remplit le tableau Mots */
+int analyseCom(char *b) {
+    char *token;
+    char *delimiters = " \t\n"; /* Séparateurs : espace, tab, newline */
+    
+    NMots = 0;
+
+    /* Utilise strsep pour découper la chaîne */
+    while ((token = strsep(&b, delimiters)) != NULL) {
+        if (*token != '\0') { /* Ignore les séparateurs consécutifs */
+            if (NMots < MAXPAR - 1) {
+                Mots[NMots] = copyString(token); 
+                NMots++;
+            }
+        }
+    }
+    Mots[NMots] = NULL;
+    return NMots;
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
