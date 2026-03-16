@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <sys/wait.h>
 
 #define MAXPAR 20
 #define NBMAXC 10 /* Nb max de commandes internes */
@@ -91,6 +92,32 @@ int execComInt(int n, char **p) {
     return 0; /* Pas une commande interne */
 }
 
+int execComExt(char **P) {
+    pid_t pid;
+    int status;
+
+    pid = fork(); /* Création du processus fils  */
+
+    if (pid == 0) {
+        /* On est dans le processus FILS */
+        /* execvp cherche le programme dans le PATH et utilise le tableau Mots  */
+        if (execvp(P[0], P) == -1) {
+            perror("biceps"); /* Affiche l'erreur si la commande n'existe pas */
+        }
+        exit(EXIT_FAILURE); /* On quitte le fils si execvp a échoué */
+    } 
+    else if (pid < 0) {
+        /* Erreur lors du fork */
+        perror("biceps (fork)");
+    } 
+    else {
+        /* On est dans le processus PÈRE */
+        /* Il attend que le fils termine son exécution  */
+        waitpid(pid, &status, 0);
+    }
+    return 1;
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
@@ -142,11 +169,8 @@ int main(int argc, char *argv[]) {
             int n = analyseCom(ligne);
 
             if (n > 0) {
-                /* Tentative d'exécution en tant que commande interne */
-                /* On passe le nombre de mots et le tableau global Mots */
                 if (!execComInt(n, Mots)) {
-                    /* Si ce n'est pas une commande interne, on affiche simplement */
-                    printf("%s : commande externe\n", Mots[0]);
+                    execComExt(Mots);
                 }
             }
 
