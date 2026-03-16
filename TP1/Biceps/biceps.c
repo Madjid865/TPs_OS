@@ -11,6 +11,15 @@
 static char *Mots[MAXPAR]; /* le tableau des mots de la commande */
 static int NMots;          /* nombre de mots de la commande */
 
+/* Copie dynamique d'une chaîne */
+char *copyString(char *s) {
+    char *copy = malloc(strlen(s) + 1);
+    if (copy) {
+        strcpy(copy, s);
+    }
+    return copy;
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
