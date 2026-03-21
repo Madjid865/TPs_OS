@@ -158,6 +158,19 @@ void majComInt(void) {
     ajouteCom("vers", version);
 }
 
+/* Exécute une seule commande */
+void executeCommande(char *cmd) {
+    if (cmd == NULL || *cmd == '\0') return;
+
+    int n = analyseCom(cmd);
+    if (n > 0) {
+        if (!execComInt(n, Mots)) {
+            execComExt(Mots);
+        }
+    }
+    libereMots(); // On libère après chaque commande du bloc ;
+}
+
 int main(int argc, char *argv[]) {
     char hostname[256];
     char *user;
@@ -205,17 +218,14 @@ int main(int argc, char *argv[]) {
         if (strlen(ligne) > 0) {
             add_history(ligne);
             
-            /* Analyse de la ligne en mots */
-            int n = analyseCom(ligne);
+            char *ptr_ligne = ligne; // strsep modifie le pointeur, on garde une copie
+            char *commande_seule;
 
-            if (n > 0) {
-                if (!execComInt(n, Mots)) {
-                    execComExt(Mots);
-                }
+            /* Découpage par point-virgule */
+            while ((commande_seule = strsep(&ptr_ligne, ";")) != NULL) {
+                /* On exécute chaque morceau séquentiellement */
+                executeCommande(commande_seule);
             }
-
-            /* Nettoyage des mots copiés par copyString */
-            libereMots();
         }
 
         // Libérer la mémoire de la ligne lue par readline
