@@ -75,12 +75,6 @@ int Sortie(int n, char **p) {
     exit(0);
 }
 
-/* Initialisation du tableau des commandes */
-void majComInt(void) {
-    ajouteCom("exit", Sortie);
-    /* On pourra ajouter "cd" ou "pwd" plus tard ici */
-}
-
 /* Exécute la commande si elle est interne */
 int execComInt(int n, char **p) {
     for (int i = 0; i < NbComInt; i++) {
@@ -116,6 +110,32 @@ int execComExt(char **P) {
         waitpid(pid, &status, 0);
     }
     return 1;
+}
+
+/* Commande interne 'cd' */
+int changeDir(int n, char **p) {
+    char *path;
+
+    // Si on tape juste "cd", on va dans le répertoire HOME
+    if (n == 1) {
+        path = getenv("HOME");
+    } else {
+        path = p[1];
+    }
+
+    // Tentative de changement de répertoire
+    if (chdir(path) != 0) {
+        perror("biceps: cd"); // Affiche l'erreur si le dossier n'existe pas
+        return 1;
+    }
+
+    return 0;
+}
+
+/* Initialisation du tableau des commandes */
+void majComInt(void) {
+    ajouteCom("exit", Sortie);
+    ajouteCom("cd", changeDir);
 }
 
 int main(int argc, char *argv[]) {
