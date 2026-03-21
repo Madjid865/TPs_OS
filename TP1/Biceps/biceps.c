@@ -6,9 +6,11 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #define MAXPAR 20
 #define NBMAXC 10 /* Nb max de commandes internes */
+#define HIST_FILE ".biceps_history"
 
 static char *Mots[MAXPAR]; /* le tableau des mots de la commande */
 static int NMots;          /* nombre de mots de la commande */
@@ -172,6 +174,7 @@ void executeCommande(char *cmd) {
 }
 
 int main(int argc, char *argv[]) {
+
     char hostname[256];
     char *user;
     char *prompt;
@@ -203,6 +206,9 @@ int main(int argc, char *argv[]) {
     // Assemblage du prompt 
     sprintf(prompt, "%s@%s%c ", user, hostname, symbole);
     
+    read_history(HIST_FILE);
+    signal(SIGINT, SIG_IGN);
+    
     // Initialisation des commandes internes
     majComInt();
 
@@ -212,6 +218,7 @@ int main(int argc, char *argv[]) {
 
         if (ligne == NULL) {
             printf("\nSortie de biceps... Bye !\n");
+            write_history(HIST_FILE);
             break;
         }
 
@@ -232,6 +239,7 @@ int main(int argc, char *argv[]) {
         free(ligne);
     }
 
+    write_history(HIST_FILE);
     free(prompt);
     return 0;
 }
