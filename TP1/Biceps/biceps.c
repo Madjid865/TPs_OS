@@ -132,10 +132,30 @@ int changeDir(int n, char **p) {
     return 0;
 }
 
+/* Commande interne 'pwd' */
+int afficheDir(int n, char **p) {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+    } else {
+        perror("biceps: pwd");
+        return 1;
+    }
+    return 0;
+}
+
+/* Commande interne 'vers' */
+int version(int n, char **p) {
+    printf("biceps version 1.00\n");
+    return 0;
+}
+
 /* Initialisation du tableau des commandes */
 void majComInt(void) {
     ajouteCom("exit", Sortie);
     ajouteCom("cd", changeDir);
+    ajouteCom("pwd", afficheDir);
+    ajouteCom("vers", version);
 }
 
 int main(int argc, char *argv[]) {
