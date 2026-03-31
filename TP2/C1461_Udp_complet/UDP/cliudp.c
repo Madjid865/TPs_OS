@@ -46,6 +46,19 @@ struct sockaddr_in Sock;
         return(4);
     }
     printf("Envoi OK !\n");
+    
+    /* ajout de l'accuse de reception */
+    char buf_ar[512];
+    struct sockaddr_in SockServeur;
+    socklen_t len = sizeof(SockServeur);
+
+    int n_ar = recvfrom(sid, buf_ar, 512, 0, (struct sockaddr *)&SockServeur, &len);
+    if (n_ar == -1) {
+        perror("erreur reception AR");
+    } else {
+        buf_ar[n_ar] = '\0';
+        printf("Accusé de réception du serveur : %s\n", buf_ar);
+    }    
     return 0;
 }
 

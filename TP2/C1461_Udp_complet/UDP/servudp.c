@@ -52,6 +52,13 @@ socklen_t ls;
       else {
         buf[n] = '\0';
         printf ("recu de %s : <%s>\n",addrip(ntohl(Sock.sin_addr.s_addr)), buf);
+  
+        /* ajout de l'accuse de reception */
+        char *ack = "Bien reçu 5/5 !";
+        // On utilise MSG_CONFIRM comme suggéré par le sujet
+        if (sendto(sid, ack, strlen(ack), MSG_CONFIRM, (struct sockaddr *)&Sock, ls) == -1) {
+            perror("sendto ack");
+        }
       }
     }
     return 0;
