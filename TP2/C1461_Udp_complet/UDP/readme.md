@@ -1,6 +1,6 @@
 # TP2 - Protocole BEUIP / biceps v2
 
-TP réseau système — Polytech Sorbonne 4A, mars 2026  
+TP réseau système — Polytech Sorbonne 4A, mars 2026
 Implémentation du protocole **BEUIP** (BEUI over IP) et intégration dans le shell **biceps**.
 
 ---
