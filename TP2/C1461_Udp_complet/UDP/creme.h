@@ -1,43 +1,78 @@
 #ifndef CREME_H
 #define CREME_H
 
-#include <sys/types.h>
+#include <netinet/in.h>
 
-/* creme v1.0 - Commandes Rapides pour l'Envoi de Messages Evolues
- * Librairie de gestion du protocole BEUIP
+/* ------------------------------------------------------------------ */
+/*  Protocole BEUIP                                                    */
+/* ------------------------------------------------------------------ */
+#define BEUIP_PORT      9998
+#define BEUIP_BCAST     "192.168.88.255"
+#define BEUIP_MAGIC     "BEUIP"        /* octets 2-6 de chaque message */
+#define BEUIP_MAXPSEUDO 32
+#define BEUIP_MAXMSG    512
+#define BEUIP_MAXTABLE  255
+
+/*
+ * Format d'un message BEUIP :
+ *   octet 0      : code (caractère)
+ *   octets 1-5   : "BEUIP"
+ *   octets 6-fin : payload (pseudo, message, …)
+ *
+ * Codes :
+ *   '0' – déconnexion (broadcast)
+ *   '1' – identification broadcast
+ *   '2' – accusé de réception (AR)
+ *   '3' – demande de liste (client → serveur local)
+ *   '4' – envoi message à un pseudo (client → serveur local)
+ *   '5' – envoi message à tous (client → serveur local)
+ *   '9' – message entrant (serveur distant → notre serveur)
  */
+#define BEUIP_CODE_QUIT     '0'
+#define BEUIP_CODE_IDENT    '1'
+#define BEUIP_CODE_AR       '2'
+#define BEUIP_CODE_LIST     '3'
+#define BEUIP_CODE_SEND     '4'
+#define BEUIP_CODE_ALL      '5'
+#define BEUIP_CODE_MSG      '9'
 
-#define PORT_BEUIP  9998
-#define BC_ADDR     "192.168.88.255"
-#define MAX_PEERS   255
+/* ------------------------------------------------------------------ */
+/*  Structure d'un couple (pseudo, adresse IP)                         */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    char            pseudo[BEUIP_MAXPSEUDO];
+    struct in_addr  addr;
+} BeuipPair;
 
-struct msg_beuip {
-    char code;
-    char entete[6];
-    char pseudo[256];
-};
+/* ------------------------------------------------------------------ */
+/*  Prototypes exportés                                                */
+/* ------------------------------------------------------------------ */
 
-/* Taille reelle a envoyer : 1(code) + 6(entete) + strlen(pseudo) + 1('\0') */
-#define MSG_SIZE(m) (7 + strlen((m).pseudo) + 1)
+/* Construction / envoi d'un message BEUIP */
+int  beuip_send(int sock, struct sockaddr_in *dest,
+                char code, const char *payload, int paylen);
 
-/* PID du processus serveur fils, 0 si non demarre */
-extern pid_t beuip_pid;
+/* Envoi en broadcast */
+int  beuip_broadcast(int sock, char code,
+                     const char *payload, int paylen);
 
-/* Demarre le serveur BEUIP dans un processus fils.
- * Retourne 0 en cas de succes, -1 si deja demarre ou erreur. */
-int creme_start(const char *pseudo);
+/* Vérification de l'en-tête d'un message reçu */
+int  beuip_check_header(const char *buf, int len, char *code_out);
 
-/* Arrete le serveur BEUIP fils (envoie SIGINT -> broadcast code '0').
- * Retourne 0 en cas de succes, -1 si non demarre. */
-int creme_stop(void);
+/* Table des couples connus */
+int  beuip_table_add(BeuipPair *table, int *nb,
+                     const char *pseudo, struct in_addr addr);
+int  beuip_table_find_by_pseudo(BeuipPair *table, int nb,
+                                const char *pseudo, struct in_addr *addr_out);
+int  beuip_table_find_by_addr(BeuipPair *table, int nb,
+                              struct in_addr addr, char *pseudo_out);
+void beuip_table_remove(BeuipPair *table, int *nb, struct in_addr addr);
+void beuip_table_print(BeuipPair *table, int nb);
 
-/* Envoie la commande LISTE au serveur local (code '3'). */
-void creme_liste(void);
+/* Création du socket UDP prêt pour le broadcast */
+int  beuip_create_socket(void);
 
-/* Envoie un message a un pseudo via le serveur local (code '4'). */
-void creme_msg_pseudo(const char *pseudo, const char *message);
-
-/* Envoie un message a tout le monde via le serveur local (code '5'). */
-void creme_msg_tous(const char *message);
+/* PID du processus serveur (géré par biceps) */
+extern pid_t beuip_server_pid;
 
 #endif /* CREME_H */

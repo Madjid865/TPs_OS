@@ -1,288 +1,276 @@
-#define _GNU_SOURCE
+/*
+ * servbeuip.c – Serveur du protocole BEUIP v1
+ *
+ * Usage : servbeuip <pseudo>
+ *
+ * Ce programme est destiné à être lancé comme processus fils par biceps
+ * via la commande interne « beuip start <pseudo> ».
+ *
+ * Signaux gérés :
+ *   SIGTERM / SIGINT → envoi d'un message '0' broadcast puis sortie propre.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
+#include <signal.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
-#include <signal.h>
 
-#define PORT_BEUIP 9998
-#define MAX_PEERS 255
-#define BC_ADDR "192.168.88.255"
+#include "creme.h"
 
-struct msg_beuip {
-    char code;
-    char entete[6];
-    char pseudo[256];
-};
+/* ------------------------------------------------------------------ */
+/*  Variables globales du serveur                                      */
+/* ------------------------------------------------------------------ */
+static int       g_sock   = -1;
+static BeuipPair g_table[BEUIP_MAXTABLE];
+static int       g_nb     = 0;
+static char      g_pseudo[BEUIP_MAXPSEUDO];
 
-/* Taille réelle : 1 (code) + 6 (entete) + strlen(pseudo) + 1 ('\0') */
-#define MSG_SIZE(m) (7 + strlen((m).pseudo) + 1)
+/* ------------------------------------------------------------------ */
+/*  Gestionnaire de signal : quitter proprement                        */
+/* ------------------------------------------------------------------ */
+static void sig_handler(int sig)
+{
+    (void)sig;
+    printf("\n[BEUIP] Arrêt du serveur (%s)...\n", g_pseudo);
 
-typedef struct {
-    struct in_addr addr;
-    char pseudo[64];
-} Peer;
-
-Peer table_utilisateurs[MAX_PEERS];
-int nb_utilisateurs = 0;
-int sid;
-char *mon_pseudo;
-
-void ajouter_peer(struct in_addr addr, char *pseudo) {
-    /* Met à jour le pseudo si l'adresse existe déjà */
-    for (int i = 0; i < nb_utilisateurs; i++) {
-        if (table_utilisateurs[i].addr.s_addr == addr.s_addr) {
-            strncpy(table_utilisateurs[i].pseudo, pseudo, 63);
-            table_utilisateurs[i].pseudo[63] = '\0';
-            return;
-        }
+    if (g_sock >= 0) {
+        /* Prévenir les autres */
+        beuip_broadcast(g_sock, BEUIP_CODE_QUIT,
+                        g_pseudo, (int)strlen(g_pseudo));
+        close(g_sock);
     }
-    if (nb_utilisateurs < MAX_PEERS) {
-        table_utilisateurs[nb_utilisateurs].addr = addr;
-        strncpy(table_utilisateurs[nb_utilisateurs].pseudo, pseudo, 63);
-        table_utilisateurs[nb_utilisateurs].pseudo[63] = '\0';
-#ifdef TRACE
-        printf("[TRACE] Ajout table : %s (%s)\n", pseudo, inet_ntoa(addr));
-#endif
-        nb_utilisateurs++;
-    }
-}
-
-/* Gère le départ propre (Code '0') */
-void hand_depart(int sig __attribute__((unused))) {
-    struct msg_beuip msg_fin;
-    memset(&msg_fin, 0, sizeof(msg_fin));
-    msg_fin.code = '0';
-    strcpy(msg_fin.entete, "BEUIP");
-    strncpy(msg_fin.pseudo, mon_pseudo, 255);
-
-    struct sockaddr_in addr_bc;
-    memset(&addr_bc, 0, sizeof(addr_bc));
-    addr_bc.sin_family      = AF_INET;
-    addr_bc.sin_port        = htons(PORT_BEUIP);
-    addr_bc.sin_addr.s_addr = inet_addr(BC_ADDR);
-
-    sendto(sid, &msg_fin, MSG_SIZE(msg_fin), 0,
-           (struct sockaddr *)&addr_bc, sizeof(addr_bc));
-    printf("\n[INFO] Signal de depart envoye. Bye !\n");
-    close(sid);
     exit(0);
 }
 
-int main(int argc, char *argv[]) {
+/* ------------------------------------------------------------------ */
+/*  main                                                               */
+/* ------------------------------------------------------------------ */
+int main(int argc, char *argv[])
+{
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <pseudo>\n", argv[0]);
-        return 1;
-    }
-    mon_pseudo = argv[1];
-    signal(SIGINT, hand_depart);
-
-    struct sockaddr_in sock_serv, sock_client;
-    socklen_t len = sizeof(sock_client);
-    struct msg_beuip msg;
-
-    /* Création du socket UDP */
-    sid = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sid < 0) { perror("socket"); return 1; }
-
-    /* Autoriser le broadcast */
-    int bc_enable = 1;
-    setsockopt(sid, SOL_SOCKET, SO_BROADCAST, &bc_enable, sizeof(bc_enable));
-
-    /* Bind sur toutes les interfaces */
-    memset(&sock_serv, 0, sizeof(sock_serv));
-    sock_serv.sin_family      = AF_INET;
-    sock_serv.sin_port        = htons(PORT_BEUIP);
-    sock_serv.sin_addr.s_addr = INADDR_ANY;
-    if (bind(sid, (struct sockaddr *)&sock_serv, sizeof(sock_serv)) < 0) {
-        perror("bind"); return 1;
+        exit(EXIT_FAILURE);
     }
 
-    /* Annonce d'arrivée (Code '1') */
-    struct sockaddr_in addr_bc;
-    memset(&addr_bc, 0, sizeof(addr_bc));
-    addr_bc.sin_family      = AF_INET;
-    addr_bc.sin_port        = htons(PORT_BEUIP);
-    addr_bc.sin_addr.s_addr = inet_addr(BC_ADDR);
+    strncpy(g_pseudo, argv[1], BEUIP_MAXPSEUDO - 1);
+    g_pseudo[BEUIP_MAXPSEUDO - 1] = '\0';
 
-    struct msg_beuip msg_init;
-    memset(&msg_init, 0, sizeof(msg_init));
-    msg_init.code = '1';
-    strcpy(msg_init.entete, "BEUIP");
-    strncpy(msg_init.pseudo, mon_pseudo, 255);
+    /* Création du socket */
+    g_sock = beuip_create_socket();
+    if (g_sock < 0) exit(EXIT_FAILURE);
 
-    sendto(sid, &msg_init, MSG_SIZE(msg_init), 0,
-           (struct sockaddr *)&addr_bc, sizeof(addr_bc));
-#ifdef TRACE
-    printf("[TRACE] Annonce broadcast envoyee avec pseudo : %s\n", mon_pseudo);
-#endif
+    /* Enregistrement des signaux */
+    signal(SIGTERM, sig_handler);
+    signal(SIGINT,  sig_handler);
 
-    printf("[INFO] Serveur BEUIP démarré avec le pseudo : %s\n", mon_pseudo);
-    printf("[INFO] En attente de messages... (Ctrl+C pour quitter)\n");
+    /* Annonce broadcast : on est là ! */
+    if (beuip_broadcast(g_sock, BEUIP_CODE_IDENT,
+                        g_pseudo, (int)strlen(g_pseudo)) < 0) {
+        fprintf(stderr, "[BEUIP] Impossible d'envoyer le broadcast initial\n");
+    } else {
+        printf("[BEUIP] Serveur démarré (pseudo : %s)\n", g_pseudo);
+    }
 
-    /* Buffer brut pour la réception — on détecte le format ensuite */
-    char buf[512];
+    /* ---------------------------------------------------------------- */
+    /*  Boucle principale de réception                                  */
+    /* ---------------------------------------------------------------- */
+    char               buf[BEUIP_MAXMSG + 16];
+    struct sockaddr_in src;
+    socklen_t          srclen;
+    char               code;
+    int                n;
 
     while (1) {
-        memset(buf, 0, sizeof(buf));
-        int n = recvfrom(sid, buf, sizeof(buf) - 1, 0,
-                         (struct sockaddr *)&sock_client, &len);
-        if (n <= 0) continue;
+        srclen = sizeof(src);
+        n = recvfrom(g_sock, buf, sizeof(buf) - 1, 0,
+                     (struct sockaddr *)&src, &srclen);
+        if (n < 0) { perror("recvfrom"); continue; }
+        buf[n] = '\0';
 
-        /* Remplir msg selon le format détecté :
-         * Format A (avec entête) : code(1) + "BEUIP\0"(6) + pseudo
-         * Format B (sans entête) : code(1) + pseudo
-         * On détecte en regardant si buf[1..5] == "BEUIP"
-         */
-        memset(&msg, 0, sizeof(msg));
-        msg.code = buf[0];
-
-        if (n >= 6 && strncmp(buf + 1, "BEUIP", 5) == 0) {
-            /* Format A : notre format natif */
-            memcpy(msg.entete, buf + 1, 6);
-            int pseudo_len = n - 7;
-            if (pseudo_len > 0 && pseudo_len < 256)
-                memcpy(msg.pseudo, buf + 7, pseudo_len);
+        /* Vérification en-tête */
+        if (!beuip_check_header(buf, n, &code)) {
 #ifdef TRACE
-            printf("[TRACE] Format A (avec entete), pseudo='%s'\n", msg.pseudo);
+            fprintf(stderr, "[TRACE] message invalide ignoré\n");
 #endif
-        } else {
-            /* Format B : sans entête, pseudo commence à offset 1 */
-            strcpy(msg.entete, "BEUIP");
-            int pseudo_len = n - 1;
-            if (pseudo_len > 0 && pseudo_len < 256)
-                memcpy(msg.pseudo, buf + 1, pseudo_len);
-#ifdef TRACE
-            printf("[TRACE] Format B (sans entete), pseudo='%s'\n", msg.pseudo);
-#endif
+            continue;
         }
 
-        char *ip_client = inet_ntoa(sock_client.sin_addr);
+        /* Payload commence à l'octet 6 */
+        char *payload = buf + 6;
+        int   plen    = n - 6;
+        char  src_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &src.sin_addr, src_ip, sizeof(src_ip));
+
 #ifdef TRACE
-        printf("[TRACE] Message recu de %s, code='%c'\n", ip_client, msg.code);
+        fprintf(stderr, "[TRACE] reçu code='%c' de %s payload='%.*s'\n",
+                code, src_ip, plen, payload);
 #endif
 
-        switch (msg.code) {
+        switch (code) {
 
-            case '1': /* Présence broadcast : on ajoute et on répond */
-                ajouter_peer(sock_client.sin_addr, msg.pseudo);
-                {
-                    struct msg_beuip ar;
-                    memset(&ar, 0, sizeof(ar));
-                    ar.code = '2';
-                    strcpy(ar.entete, "BEUIP");
-                    strncpy(ar.pseudo, mon_pseudo, 255);
-                    sendto(sid, &ar, MSG_SIZE(ar), 0,
-                           (struct sockaddr *)&sock_client, len);
+        /* ---- '1' : identification ---------------------------------- */
+        case BEUIP_CODE_IDENT: {
+            /* Ignorer nos propres broadcasts */
+            /* (on pourrait vérifier l'IP locale mais c'est complexe;
+               on se contente de ne pas s'ajouter nous-mêmes si déjà présent) */
+            char pseudo_tmp[BEUIP_MAXPSEUDO] = {0};
+            if (plen > 0 && plen < BEUIP_MAXPSEUDO) {
+                memcpy(pseudo_tmp, payload, plen);
+                pseudo_tmp[plen] = '\0';
+            }
+
+            int r = beuip_table_add(g_table, &g_nb, pseudo_tmp, src.sin_addr);
+            if (r == 1)
+                printf("[BEUIP] Nouveau : %s (%s)\n", pseudo_tmp, src_ip);
+
+            /* Envoyer un AR avec notre pseudo (sauf à nous-mêmes) */
+            if (strcmp(pseudo_tmp, g_pseudo) != 0) {
+                beuip_send(g_sock, &src, BEUIP_CODE_AR,
+                           g_pseudo, (int)strlen(g_pseudo));
+            }
+            break;
+        }
+
+        /* ---- '2' : accusé de réception ----------------------------- */
+        case BEUIP_CODE_AR: {
+            char pseudo_tmp[BEUIP_MAXPSEUDO] = {0};
+            if (plen > 0 && plen < BEUIP_MAXPSEUDO) {
+                memcpy(pseudo_tmp, payload, plen);
+                pseudo_tmp[plen] = '\0';
+            }
+            int r = beuip_table_add(g_table, &g_nb, pseudo_tmp, src.sin_addr);
+            if (r == 1)
+                printf("[BEUIP] AR de : %s (%s)\n", pseudo_tmp, src_ip);
+            break;
+        }
+
+        /* ---- '0' : déconnexion ------------------------------------- */
+        case BEUIP_CODE_QUIT: {
+            char pseudo_tmp[BEUIP_MAXPSEUDO] = {0};
+            if (plen > 0 && plen < BEUIP_MAXPSEUDO) {
+                memcpy(pseudo_tmp, payload, plen);
+                pseudo_tmp[plen] = '\0';
+            }
+            printf("[BEUIP] Déconnexion de : %s (%s)\n", pseudo_tmp, src_ip);
+            beuip_table_remove(g_table, &g_nb, src.sin_addr);
+            break;
+        }
+
+        /* ---- '3' : liste (commande locale uniquement) -------------- */
+        case BEUIP_CODE_LIST: {
+            /* Sécurité : accepter uniquement depuis 127.0.0.1 */
+            if (src.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+                fprintf(stderr, "[BEUIP] commande '3' refusée (source : %s)\n",
+                        src_ip);
+                break;
+            }
+            /* Construire la réponse texte et la renvoyer au client local */
+            char resp[4096] = {0};
+            char tmp[256];
+            char ip_str[INET_ADDRSTRLEN];
+            snprintf(resp, sizeof(resp),
+                     "\nUtilisateurs présents (%d) :\n", g_nb);
+            for (int i = 0; i < g_nb; i++) {
+                inet_ntop(AF_INET, &g_table[i].addr, ip_str, sizeof(ip_str));
+                const char *ps = (g_table[i].pseudo[0] != '\0')
+                                 ? g_table[i].pseudo : "(inconnu)";
+                snprintf(tmp, sizeof(tmp), "  %-20s %s\n", ps, ip_str);
+                strncat(resp, tmp, sizeof(resp) - strlen(resp) - 1);
+            }
+            /* Envoyer via UDP au port d'écoute du client (src.sin_port) */
+            sendto(g_sock, resp, strlen(resp), 0,
+                   (struct sockaddr *)&src, sizeof(src));
+            break;
+        }
+
+        /* ---- '4' : envoyer message à un pseudo (commande locale) --- */
+        case BEUIP_CODE_SEND: {
+            if (src.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+                fprintf(stderr, "[BEUIP] commande '4' refusée (source : %s)\n",
+                        src_ip);
+                break;
+            }
+            /* payload = pseudo\0message */
+            char *dest_pseudo = payload;
+            char *msg         = memchr(payload, '\0', plen);
+            if (!msg || msg + 1 >= payload + plen) {
+                fprintf(stderr, "[BEUIP] format '4' invalide\n");
+                break;
+            }
+            msg++; /* pointe sur le message */
+
+            struct in_addr dest_addr;
+            if (!beuip_table_find_by_pseudo(g_table, g_nb,
+                                            dest_pseudo, &dest_addr)) {
+                printf("[BEUIP] Pseudo '%s' introuvable\n", dest_pseudo);
+                break;
+            }
+            struct sockaddr_in dest;
+            memset(&dest, 0, sizeof(dest));
+            dest.sin_family = AF_INET;
+            dest.sin_port   = htons(BEUIP_PORT);
+            dest.sin_addr   = dest_addr;
+
+            int msglen = (int)strlen(msg);
+            beuip_send(g_sock, &dest, BEUIP_CODE_MSG, msg, msglen);
+            printf("[BEUIP] Message envoyé à %s\n", dest_pseudo);
+            break;
+        }
+
+        /* ---- '5' : message à tout le monde (commande locale) ------- */
+        case BEUIP_CODE_ALL: {
+            if (src.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+                fprintf(stderr, "[BEUIP] commande '5' refusée (source : %s)\n",
+                        src_ip);
+                break;
+            }
+            /* payload = le message */
+            char msg[BEUIP_MAXMSG] = {0};
+            if (plen > 0 && plen < BEUIP_MAXMSG) {
+                memcpy(msg, payload, plen);
+                msg[plen] = '\0';
+            }
+            struct sockaddr_in dest;
+            memset(&dest, 0, sizeof(dest));
+            dest.sin_family = AF_INET;
+            dest.sin_port   = htons(BEUIP_PORT);
+
+            for (int i = 0; i < g_nb; i++) {
+                /* Ne pas s'envoyer à soi-même */
+                dest.sin_addr = g_table[i].addr;
+                beuip_send(g_sock, &dest, BEUIP_CODE_MSG,
+                           msg, (int)strlen(msg));
+            }
+            printf("[BEUIP] Message envoyé à tous (%d destinataires)\n", g_nb);
+            break;
+        }
+
+        /* ---- '9' : message reçu d'un autre utilisateur ------------ */
+        case BEUIP_CODE_MSG: {
+            char expediteur[BEUIP_MAXPSEUDO] = "inconnu";
+            beuip_table_find_by_addr(g_table, g_nb,
+                                     src.sin_addr, expediteur);
+            char msg[BEUIP_MAXMSG] = {0};
+            if (plen > 0 && plen < BEUIP_MAXMSG) {
+                memcpy(msg, payload, plen);
+                msg[plen] = '\0';
+            }
+            printf("\n*** Message de %s : %s\n", expediteur, msg);
+            break;
+        }
+
+        default:
 #ifdef TRACE
-                    printf("[TRACE] AR envoye a %s (%s)\n", msg.pseudo, ip_client);
+            fprintf(stderr, "[TRACE] code inconnu : '%c'\n", code);
 #endif
-                }
-                break;
-
-            case '2': /* Réception d'un AR : on ajoute le pair */
-                ajouter_peer(sock_client.sin_addr, msg.pseudo);
-#ifdef TRACE
-                printf("[TRACE] AR recu de %s (%s)\n", msg.pseudo, ip_client);
-#endif
-                break;
-
-            case '3': /* Commande LISTE — local uniquement */
-                if (strcmp(ip_client, "127.0.0.1") != 0) break;
-                printf("\n--- Table BEUIP (%d utilisateur(s)) ---\n", nb_utilisateurs);
-                for (int i = 0; i < nb_utilisateurs; i++)
-                    printf("  %s -> %s\n",
-                           table_utilisateurs[i].pseudo,
-                           inet_ntoa(table_utilisateurs[i].addr));
-                printf("---\n");
-                break;
-
-            case '4': /* Envoyer message à un pseudo — local uniquement */
-                if (strcmp(ip_client, "127.0.0.1") != 0) break;
-                {
-                    /* pseudo\0message dans msg.pseudo */
-                    char *target = msg.pseudo;
-                    char *text   = msg.pseudo + strlen(target) + 1;
-                    int trouve   = 0;
-                    for (int i = 0; i < nb_utilisateurs; i++) {
-                        if (strcmp(table_utilisateurs[i].pseudo, target) == 0) {
-                            struct msg_beuip m9;
-                            memset(&m9, 0, sizeof(m9));
-                            m9.code = '9';
-                            strcpy(m9.entete, "BEUIP");
-                            strncpy(m9.pseudo, text, 255);
-                            struct sockaddr_in dest;
-                            memset(&dest, 0, sizeof(dest));
-                            dest.sin_family      = AF_INET;
-                            dest.sin_port        = htons(PORT_BEUIP);
-                            dest.sin_addr        = table_utilisateurs[i].addr;
-                            sendto(sid, &m9, MSG_SIZE(m9), 0,
-                                   (struct sockaddr *)&dest, sizeof(dest));
-                            trouve = 1;
-#ifdef TRACE
-                            printf("[TRACE] Message envoye a %s : %s\n", target, text);
-#endif
-                            break;
-                        }
-                    }
-                    if (!trouve)
-                        printf("[WARN] Pseudo introuvable : %s\n", target);
-                }
-                break;
-
-            case '5': /* Message à tout le monde — local uniquement */
-                if (strcmp(ip_client, "127.0.0.1") != 0) break;
-                for (int i = 0; i < nb_utilisateurs; i++) {
-                    struct msg_beuip m9_all;
-                    memset(&m9_all, 0, sizeof(m9_all));
-                    m9_all.code = '9';
-                    strcpy(m9_all.entete, "BEUIP");
-                    strncpy(m9_all.pseudo, msg.pseudo, 255);
-                    struct sockaddr_in dest;
-                    memset(&dest, 0, sizeof(dest));
-                    dest.sin_family      = AF_INET;
-                    dest.sin_port        = htons(PORT_BEUIP);
-                    dest.sin_addr        = table_utilisateurs[i].addr;
-                    sendto(sid, &m9_all, MSG_SIZE(m9_all), 0,
-                           (struct sockaddr *)&dest, sizeof(dest));
-                }
-#ifdef TRACE
-                printf("[TRACE] Message broadcast envoye a %d pairs\n", nb_utilisateurs);
-#endif
-                break;
-
-            case '9': /* Affichage d'un message reçu */
-                {
-                    char *exp = "Inconnu";
-                    for (int i = 0; i < nb_utilisateurs; i++)
-                        if (table_utilisateurs[i].addr.s_addr == sock_client.sin_addr.s_addr)
-                            exp = table_utilisateurs[i].pseudo;
-                    printf("Message de %s : %s\n", exp, msg.pseudo);
-                }
-                break;
-
-            case '0': /* Quelqu'un quitte le réseau */
-                for (int i = 0; i < nb_utilisateurs; i++) {
-                    if (table_utilisateurs[i].addr.s_addr == sock_client.sin_addr.s_addr) {
-                        printf("[INFO] %s a quitté le réseau.\n",
-                               table_utilisateurs[i].pseudo);
-                        /* Suppression par écrasement avec le dernier */
-                        table_utilisateurs[i] = table_utilisateurs[nb_utilisateurs - 1];
-                        nb_utilisateurs--;
-                        break;
-                    }
-                }
-                break;
-
-            default:
-#ifdef TRACE
-                printf("[TRACE] Code inconnu '%c' ignoré.\n", msg.code);
-#endif
-                break;
+            break;
         }
     }
+
+    /* Jamais atteint */
+    return 0;
 }

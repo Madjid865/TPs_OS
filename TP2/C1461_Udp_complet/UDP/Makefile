@@ -1,45 +1,52 @@
+# ============================================================
+# Makefile – biceps v2 + gescom + creme + servbeuip
+# ============================================================
+
 CC      = gcc
 CFLAGS  = -Wall -Wextra -g
-LDFLAGS = -lreadline
+# Décommenter pour activer les traces :
+# CFLAGS += -DTRACE
 
-# Pour activer les traces : make trace
+LDFLAGS_BICEPS   = -lreadline -lgescom -lcreme -L.
+LDFLAGS_SERV     = -lcreme -L.
 
-# ---------- Cibles principales ----------
-all: biceps servbeuip clibeuip
+# Librairies statiques produites
+LIB_GESCOM = libgescom.a
+LIB_CREME  = libcreme.a
 
-# ---------- biceps (shell) ----------
-biceps: biceps.o gescom.o creme.o
-	$(CC) -o biceps biceps.o gescom.o creme.o $(LDFLAGS)
+.PHONY: all clean
 
-biceps.o: biceps.c gescom.h creme.h
-	$(CC) $(CFLAGS) -c biceps.c
+# ---- Cibles principales -------------------------------------
+all: $(LIB_GESCOM) $(LIB_CREME) biceps servbeuip
 
-gescom.o: gescom.c gescom.h creme.h
-	$(CC) $(CFLAGS) -c gescom.c
+# ---- libgescom.a --------------------------------------------
+$(LIB_GESCOM): gescom.o
+	ar rcs $@ $^
+
+gescom.o: gescom.c gescom.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# ---- libcreme.a ---------------------------------------------
+$(LIB_CREME): creme.o
+	ar rcs $@ $^
 
 creme.o: creme.c creme.h
-	$(CC) $(CFLAGS) -c creme.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# ---------- servbeuip (serveur BEUIP) ----------
-servbeuip: servbeuip.o
-	$(CC) -o servbeuip servbeuip.o
+# ---- biceps -------------------------------------------------
+biceps: biceps.o $(LIB_GESCOM) $(LIB_CREME)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS_BICEPS)
 
-servbeuip.o: servbeuip.c
-	$(CC) $(CFLAGS) -c servbeuip.c
+biceps.o: biceps.c gescom.h creme.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# ---------- clibeuip (client BEUIP) ----------
-clibeuip: clibeuip.o
-	$(CC) -o clibeuip clibeuip.o
+# ---- servbeuip ----------------------------------------------
+servbeuip: servbeuip.o $(LIB_CREME)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS_SERV)
 
-clibeuip.o: clibeuip.c
-	$(CC) $(CFLAGS) -c clibeuip.c
+servbeuip.o: servbeuip.c creme.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# ---------- compilation avec traces ----------
-trace: CFLAGS += -DTRACE
-trace: all
-
-# ---------- nettoyage ----------
+# ---- Nettoyage ----------------------------------------------
 clean:
-	rm -f *.o biceps servbeuip clibeuip
-
-.PHONY: all trace clean
+	rm -f *.o $(LIB_GESCOM) $(LIB_CREME) biceps servbeuip
