@@ -82,7 +82,3 @@ make memory-leak
 valgrind --leak-check=full --track-origins=yes --errors-for-leak-kinds=all \
          --error-exitcode=1 ./biceps-memory-leaks
 ```
-
-## Auteurs
-
-Groupe SERIANE — Polytech Sorbonne, 2026
